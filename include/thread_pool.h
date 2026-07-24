@@ -26,6 +26,13 @@ typedef struct ThreadArena {
     uint64_t total_frees;
 } ThreadArena;
 
+typedef struct MemorySlab {
+    uint8_t *buffer;
+    size_t capacity;
+    size_t offset;
+    struct MemorySlab *next_slab; // <-- The elastic link to the next expanded pool
+} MemorySlab;
+
 // Public API
 void memguard_init_thread_arena(size_t slab_size);
 void* memguard_thread_alloc(size_t size);
