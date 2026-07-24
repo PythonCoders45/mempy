@@ -112,6 +112,45 @@ void memguard_thread_free(void* ptr) {
 void memguard_destroy_thread_arena(void) {
     if (!t_local_arena) return;
 
+void* memguard_thread_alloc_elastic(size_t size) {
+    if (!t_local_arena) return NULL;
+
+    size_t payload_size = align_to_cache(size);
+    size_t total_req_size = sizeof(ChunkHeader) + payload_size;
+
+    // Check if current active slab has room
+    MemorySlab *current = t_local_arena->active_slab;
+    
+    if (current->offset + total_req_size > current->capacity) {
+        // --- ELASTIC EXPANSION PIECE ---
+        // Calculate new capacity (Double the old size or match requested size)
+        size_t new_capacity = current->capacity * 2;
+        if (new_capacity < total_req_size) {
+            new_capacity = total_req_size * 2;
+        }
+
+        // Allocate a new 64-byte aligned slab from OS
+        MemorySlab *new_slab = (MemorySlab*)malloc(sizeof(MemorySlab));
+        new_slab->buffer = (uint8_t*)_aligned_malloc(new_capacity, CACHE_LINE_SIZE);
+        new_slab->capacity = new_capacity;
+        new_slab->offset = 0;
+        new_slab->next_slab = NULL;
+
+        // Link the old slab to the new elastic slab
+        current->next_slab = new_slab;
+        t_local_arena->active_slab = new_slab; // Move active pointer forward
+        current = new_slab;
+    }
+
+    // Allocate from the current active slab
+    ChunkHeader *header = (ChunkHeader*)&current->buffer[current->offset];
+    header->size = payload_size;
+    header->is_free = false;
+
+    current->offset += total_req_size;
+    return (void*)((uint8_t*)header + sizeof(ChunkHeader));
+}
+
 #if defined(_WIN32)
     _aligned_free(t_local_arena->raw_buffer);
 #else
